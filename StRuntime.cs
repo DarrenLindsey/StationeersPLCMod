@@ -12,7 +12,7 @@ namespace StationeersPlc
     // A small IEC 61131-3 Structured Text interpreter that reads and writes the same four tables
     // an external PLC sees. Supported: PROGRAM/VAR, BOOL/INT/UINT/DINT/REAL/TIME, AT %IX %QX %IW %QW,
     // IF/ELSIF/ELSE, WHILE, := , AND OR XOR NOT, + - * / MOD, comparisons, TON timers,
-    // ABS MIN MAX LIMIT. Everything is evaluated as double; BOOL and integer types are normalised on assignment.
+    // ABS MIN MAX LIMIT DT, FUNCTION_BLOCK (built-in library in StLibrary.cs, or the player's own). Everything is evaluated as double; BOOL and integer types are normalised on assignment.
     // ---------------------------------------------------------------------------------------------
 
     internal sealed class StVar
@@ -26,6 +26,7 @@ namespace StationeersPlc
         public int Address;
         public bool IsTimer;
         public double Elapsed, PresetMs;
+        public double Init; // declared start value; a block's private variables go back to it on every Run
         public bool Q;
         public bool IsBool => Type == "BOOL";
     }
@@ -115,6 +116,7 @@ namespace StationeersPlc
                 case "MIN": return Math.Min(Args[0].Eval(c), Args[1].Eval(c));
                 case "MAX": return Math.Max(Args[0].Eval(c), Args[1].Eval(c));
                 case "LIMIT": return Math.Max(Args[0].Eval(c), Math.Min(Args[1].Eval(c), Args[2].Eval(c)));
+                case "DT": return c.DtMs; // milliseconds since the previous scan
             }
             return 0;
         }
@@ -133,6 +135,13 @@ namespace StationeersPlc
             }
             Target.Value = v;
         }
+    }
+
+    /// <summary>A run of statements treated as one. A function block call becomes one of these: input assignments, then the block body.</summary>
+    internal sealed class StSeq : StStmt
+    {
+        public List<StStmt> Body = new List<StStmt>();
+        public override void Exec(StCtx c) { foreach (var s in Body) s.Exec(c); }
     }
 
     internal sealed class StIf : StStmt
@@ -189,6 +198,37 @@ namespace StationeersPlc
         private const int MaxTokens = 5000;   // a typical student program is well under 1000
         private const int MaxDepth = 64;      // nested IF / WHILE / brackets / NOT chains
 
+        private const int MaxNodes = 20000;     // statements after function blocks are copied in at each call
+        private const int MaxInstances = 64;    // function block instances in one program
+
+        /// <summary>A function block definition. The body is kept as tokens and parsed again at every call site (inlined).</summary>
+        private sealed class FbDef
+        {
+            public string Name;
+            public List<Tok> Toks;
+            public int DeclStart, BodyStart;
+            public readonly HashSet<string> Inputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        // The built-in block library (StLibrary.cs) is parsed once. If it ever fails to load, the rest of the PLC keeps working
+        // and the error is reported only to a program that tries to use a block.
+        private static Dictionary<string, FbDef> _lib;
+        private static string _libError;
+        private static readonly object LibGate = new object();
+
+        private static Dictionary<string, FbDef> Lib()
+        {
+            lock (LibGate)
+            {
+                if (_lib != null) return _lib;
+                var d = new Dictionary<string, FbDef>(StringComparer.OrdinalIgnoreCase);
+                try { new Parser(Lex(StLibrary.Source), d).ParseDefinitionsOnly(); }
+                catch (StParseException e) { d.Clear(); _libError = "the built-in block library failed to load: " + e.Message; }
+                _lib = d;
+                return d;
+            }
+        }
+
         public static StProgram Compile(string src, out string error)
         {
             try
@@ -196,10 +236,20 @@ namespace StationeersPlc
                 error = null;
                 var toks = Lex(src);
                 if (toks.Count > MaxTokens) throw new StParseException("program is too long (limit " + MaxTokens + " tokens)", 1);
-                return new Parser(toks).ParseProgram();
+                var defs = new Dictionary<string, FbDef>(Lib(), StringComparer.OrdinalIgnoreCase);
+                return new Parser(toks, defs).ParseProgram();
             }
-            catch (StParseException e) { error = e.Message; return null; }
+            catch (StParseException e)
+            {
+                error = e.Message;
+                string lib = LibraryError;
+                if (lib != null && e.Message.Contains("not supported")) error += " (" + lib + ")";
+                return null;
+            }
         }
+
+        /// <summary>Null when the built-in block library loaded fine, otherwise why it did not.</summary>
+        public static string LibraryError { get { Lib(); return _libError; } }
 
         private static List<Tok> Lex(string s)
         {
@@ -262,9 +312,14 @@ namespace StationeersPlc
 
         private sealed class Parser
         {
-            private readonly List<Tok> _t; private int _p; private StProgram _prog;
+            private List<Tok> _t; private int _p; private StProgram _prog;
             private int _depth; // current nesting level, see MaxDepth
-            public Parser(List<Tok> t) { _t = t; }
+            private string _scope = "";   // "" in the PROGRAM, "inst." while reading a block body; makes block variables private
+            private int _nodes;           // statements parsed so far, see MaxNodes
+            private readonly Dictionary<string, FbDef> _defs;
+            private readonly Dictionary<string, FbDef> _insts = new Dictionary<string, FbDef>(StringComparer.OrdinalIgnoreCase);
+            private readonly List<string> _fbStack = new List<string>(); // blocks being expanded, stops a block containing itself
+            public Parser(List<Tok> t, Dictionary<string, FbDef> defs) { _t = t; _defs = defs; }
 
             /// <summary>Call on entry to every recursive parse step; pair with _depth-- in a finally block.</summary>
             private void Enter() { if (++_depth > MaxDepth) throw Err("program is nested too deeply (limit " + MaxDepth + " levels)"); }
@@ -280,18 +335,126 @@ namespace StationeersPlc
             public StProgram ParseProgram()
             {
                 _prog = new StProgram();
+                while (IsKw("FUNCTION_BLOCK")) ParseFbDef();
                 ExpectKw("PROGRAM"); ExpectId();
-                while (IsKw("VAR")) ParseVars();
+                while (IsKw("VAR") || IsKw("VAR_INPUT") || IsKw("VAR_OUTPUT")) ParseVars();
                 ParseBlock(_prog.Body, "END_PROGRAM");
                 ExpectKw("END_PROGRAM");
                 return _prog;
             }
 
+            /// <summary>Used for the built-in library: only FUNCTION_BLOCK definitions, each checked by a trial expansion.</summary>
+            public void ParseDefinitionsOnly()
+            {
+                _prog = new StProgram();
+                while (IsKw("FUNCTION_BLOCK")) ParseFbDef();
+                if (Cur.Kind != "end") throw Err("expected FUNCTION_BLOCK but found '" + Cur.Text + "'");
+            }
+
+            // FUNCTION_BLOCK Name  VAR_INPUT.. VAR_OUTPUT.. VAR.. (statements)  END_FUNCTION_BLOCK
+            // The definition is only recorded here (names and where the body starts). Instances are created by a declaration
+            // such as  Pump1 : HYST;  and each call  Pump1(IN := x);  copies the body in, with the instance's own variables.
+            private void ParseFbDef()
+            {
+                ExpectKw("FUNCTION_BLOCK");
+                var def = new FbDef { Name = ExpectId(), Toks = _t };
+                string up = def.Name.ToUpperInvariant();
+                if (_defs.ContainsKey(def.Name) || up == "TON" || up == "BOOL" || up == "INT" || up == "UINT" || up == "DINT" || up == "WORD" || up == "REAL" || up == "TIME")
+                    throw Err("a block or type named " + def.Name + " already exists");
+                def.DeclStart = _p;
+                while (IsKw("VAR_INPUT") || IsKw("VAR_OUTPUT") || IsKw("VAR"))
+                {
+                    bool input = IsKw("VAR_INPUT");
+                    _p++;
+                    while (!IsKw("END_VAR"))
+                    {
+                        if (Cur.Kind == "end") throw Err("missing END_VAR");
+                        var names = new List<string> { ExpectId() };
+                        while (IsSym(",")) { _p++; names.Add(ExpectId()); }
+                        ExpectSym(":");
+                        while (!IsSym(";")) { if (Cur.Kind == "end") throw Err("missing ';' in a declaration"); _p++; }
+                        _p++;
+                        if (input) foreach (var n in names) def.Inputs.Add(n);
+                    }
+                    _p++; // END_VAR
+                }
+                def.BodyStart = _p;
+                while (!IsKw("END_FUNCTION_BLOCK")) { if (Cur.Kind == "end") throw Err("missing END_FUNCTION_BLOCK for " + def.Name); _p++; }
+                _p++;
+                _defs[def.Name] = def;
+
+                // Trial expansion so a mistake inside the block is reported here, even if nothing uses the block yet.
+                var savedProg = _prog; int savedNodes = _nodes;
+                _prog = new StProgram();
+                try { CreateInstance("_chk", def); InlineBody(def, "_chk.", new List<StStmt>()); }
+                finally
+                {
+                    _prog = savedProg; _nodes = savedNodes;
+                    var gone = new List<string>();
+                    foreach (var k in _insts.Keys) if (k.StartsWith("_chk", StringComparison.OrdinalIgnoreCase)) gone.Add(k);
+                    foreach (var k in gone) _insts.Remove(k);
+                }
+            }
+
+            /// <summary>Declares the private variables of one block instance, named "instance.variable".</summary>
+            private void CreateInstance(string full, FbDef def)
+            {
+                if (_fbStack.Contains(def.Name)) throw Err("block " + def.Name + " cannot contain itself");
+                if (_insts.Count >= MaxInstances) throw Err("too many function block instances (limit " + MaxInstances + ")");
+                _insts[full] = def;
+                var st = _t; int sp = _p; string ss = _scope;
+                _fbStack.Add(def.Name);
+                try
+                {
+                    _t = def.Toks; _p = def.DeclStart; _scope = full + ".";
+                    while (IsKw("VAR_INPUT") || IsKw("VAR_OUTPUT") || IsKw("VAR")) ParseVars();
+                }
+                finally { _fbStack.RemoveAt(_fbStack.Count - 1); _t = st; _p = sp; _scope = ss; }
+            }
+
+            /// <summary>Parses the block body into 'into', with its variables resolved under 'prefix'.</summary>
+            private void InlineBody(FbDef def, string prefix, List<StStmt> into)
+            {
+                if (_fbStack.Contains(def.Name)) throw Err("block " + def.Name + " cannot call itself");
+                var st = _t; int sp = _p; string ss = _scope;
+                _fbStack.Add(def.Name);
+                try
+                {
+                    _t = def.Toks; _p = def.BodyStart; _scope = prefix;
+                    ParseBlock(into, "END_FUNCTION_BLOCK");
+                }
+                finally { _fbStack.RemoveAt(_fbStack.Count - 1); _t = st; _p = sp; _scope = ss; }
+            }
+
+            // Instance(Input := expression, Other := expression);   Inputs you leave out keep their last value.
+            private StStmt ParseFbCall(string full, FbDef def)
+            {
+                var seq = new StSeq();
+                ExpectSym("(");
+                while (!IsSym(")"))
+                {
+                    string arg = ExpectId();
+                    if (!def.Inputs.Contains(arg)) throw Err(def.Name + " has no input '" + arg + "'");
+                    ExpectSym(":=");
+                    var e = ParseExpr();
+                    var target = _prog.Find(full + "." + arg);
+                    if (target == null) throw Err(def.Name + " input '" + arg + "' cannot be set here");
+                    seq.Body.Add(new StAssign { Target = target, Value = e });
+                    if (IsSym(",")) _p++;
+                }
+                ExpectSym(")"); ExpectSym(";");
+                InlineBody(def, full + ".", seq.Body);
+                return seq;
+            }
+
             private void ParseVars()
             {
-                ExpectKw("VAR");
+                string open = Cur.Text.ToUpperInvariant(); // VAR, VAR_INPUT or VAR_OUTPUT
+                if (_scope == "" && open != "VAR") throw Err(open + " can only be used inside a FUNCTION_BLOCK (use VAR in the PROGRAM)");
+                _p++;
                 while (!IsKw("END_VAR"))
                 {
+                    if (Cur.Kind == "end") throw Err("missing END_VAR");
                     var names = new List<string> { ExpectId() };
                     string addrText = null;
                     if (IsKw("AT"))
@@ -309,12 +472,24 @@ namespace StationeersPlc
 
                     foreach (var n in names)
                     {
-                        if (_prog.Find(n) != null) throw Err("variable '" + n + "' is declared twice");
-                        var v = new StVar { Name = n, Type = type == "TON" ? "TON" : type, Value = init };
+                        string full = _scope + n;
+                        if (_prog.Find(full) != null || _insts.ContainsKey(full)) throw Err("variable '" + n + "' is declared twice");
+                        FbDef fb;
+                        if (type != "TON" && _defs.TryGetValue(type, out fb))
+                        {
+                            if (addrText != null) throw Err("a function block cannot have an address (AT)");
+                            CreateInstance(full, fb);
+                            continue;
+                        }
+                        var v = new StVar { Name = full, Type = type == "TON" ? "TON" : type, Value = init, Init = init };
                         if (type == "TON") v.IsTimer = true;
                         else if (type != "BOOL" && type != "INT" && type != "UINT" && type != "DINT" && type != "WORD" && type != "REAL" && type != "TIME")
-                            throw Err("type " + type + " is not supported (use BOOL INT UINT DINT REAL TIME TON)");
-                        if (addrText != null) BindAddress(v, addrText);
+                            throw Err("type " + type + " is not supported (use BOOL INT UINT DINT REAL TIME TON, or a function block name)");
+                        if (addrText != null)
+                        {
+                            if (_scope != "") throw Err("addresses (AT) are only allowed in the PROGRAM; pass the value into the block through an input");
+                            BindAddress(v, addrText);
+                        }
                         _prog.Vars.Add(v);
                     }
                 }
@@ -394,7 +569,11 @@ namespace StationeersPlc
                 }
             }
 
-            private StStmt ParseStmt() { Enter(); try { return ParseStmtCore(); } finally { _depth--; } }
+            private StStmt ParseStmt()
+            {
+                if (++_nodes > MaxNodes) throw Err("program expands to too many statements (limit " + MaxNodes + "); each function block call copies the block in");
+                Enter(); try { return ParseStmtCore(); } finally { _depth--; }
+            }
 
             private StStmt ParseStmtCore()
             {
@@ -422,7 +601,10 @@ namespace StationeersPlc
                 }
 
                 string name = ExpectId();
-                var v = _prog.Find(name);
+                string full = _scope + name;
+                FbDef calledDef;
+                if (_insts.TryGetValue(full, out calledDef)) return ParseFbCall(full, calledDef);
+                var v = _prog.Find(full);
                 if (v == null) throw Err("unknown variable '" + name + "'");
                 if (v.IsTimer)
                 {
@@ -512,16 +694,29 @@ namespace StationeersPlc
                     string up = name.ToUpperInvariant();
                     if (IsSym("("))
                     {
-                        if (up != "ABS" && up != "MIN" && up != "MAX" && up != "LIMIT") throw Err("unknown function " + name);
+                        if (up != "ABS" && up != "MIN" && up != "MAX" && up != "LIMIT" && up != "DT") throw Err("unknown function " + name);
                         _p++;
                         var f = new StFn { Name = up };
                         while (!IsSym(")")) { f.Args.Add(ParseExpr()); if (IsSym(",")) _p++; else break; }
                         ExpectSym(")");
-                        int need = up == "ABS" ? 1 : up == "LIMIT" ? 3 : 2;
+                        int need = up == "ABS" ? 1 : up == "LIMIT" ? 3 : up == "DT" ? 0 : 2;
                         if (f.Args.Count != need) throw Err(up + " needs " + need + " arguments");
                         return f;
                     }
-                    var v = _prog.Find(name);
+                    string full = _scope + name;
+                    FbDef instDef;
+                    if (_insts.TryGetValue(full, out instDef))
+                    {
+                        // Block.Output  reads a variable of a block instance
+                        if (!IsSym(".")) throw Err("use " + name + ".<name>, for example " + name + ".Q");
+                        _p++;
+                        string mem = ExpectId();
+                        var mv = _prog.Find(full + "." + mem);
+                        if (mv == null) throw Err("block " + instDef.Name + " has no variable '" + mem + "'");
+                        if (mv.IsTimer) throw Err("'" + mem + "' is a timer inside the block and cannot be read from outside");
+                        return new StRef { Var = mv };
+                    }
+                    var v = _prog.Find(full);
                     if (v == null) throw Err("unknown variable '" + name + "'");
                     string member = null;
                     if (IsSym("."))
@@ -690,6 +885,7 @@ END_PROGRAM
                         foreach (var v in _prog.Vars)
                         {
                             v.Elapsed = 0; v.Q = false;
+                            if (!v.Bound && v.Name.IndexOf('.') >= 0) v.Value = v.Init; // a function block's private variables start fresh
                             if (v.Bound && v.IsOutput) v.Value = ReadPoint(v); // start from the real device state
                         }
                         _last = now; _next = now;

@@ -192,6 +192,24 @@ namespace StationeersPlc
                 Send(c, "queued", "text/plain");
                 return;
             }
+            if (post && path == "/api/write")
+            {
+                // Manual on/off switch from the I/O list: lets a student see a device react in the game.
+                // Coils only. Same rules as an outside Modbus write: refused while the program runs
+                // (it owns the outputs) or when AllowWrites is false.
+                int addr;
+                if (!int.TryParse(c.Request.QueryString["addr"], out addr) || addr < 0 || addr >= PointStore.Size) { Send(c, "bad address", "text/plain", 400); return; }
+                string v = c.Request.QueryString["value"];
+                if (v != "0" && v != "1") { Send(c, "bad value", "text/plain", 400); return; }
+                if (!Plugin.WritesAllowed) { Send(c, "Writes are turned off (AllowWrites=false).", "text/plain", 409); return; }
+                if (StRuntime.Running && StRuntime.BlockExternalWrites) { Send(c, "The program is running and owns the outputs. Press Stop first.", "text/plain", 409); return; }
+                if (!PointStore.CoilAssigned[addr]) { Send(c, "That address is not an assigned switch.", "text/plain", 409); return; }
+                bool on = v == "1";
+                PointStore.Coil[addr] = on;
+                Plugin.PendingWrites.Enqueue(new WriteRequest { Table = Table.Coil, Address = addr, Value = on ? 1 : 0 });
+                Send(c, "queued", "text/plain");
+                return;
+            }
             if (post && path == "/api/prune")
             {
                 IoMap.RequestPrune();

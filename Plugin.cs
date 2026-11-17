@@ -31,6 +31,8 @@ namespace StationeersPlc
         internal static ManualLogSource Log;
         /// <summary>Outputs waiting to be applied to game devices. Filled by Modbus threads and the ST program, drained by PlcRuntime.Tick on the main thread.</summary>
         internal static readonly ConcurrentQueue<WriteRequest> PendingWrites = new ConcurrentQueue<WriteRequest>();
+        /// <summary>Mirrors the Modbus AllowWrites setting so the web page's manual switches obey it too.</summary>
+        internal static volatile bool WritesAllowed = true;
 
         private void Awake()
         {
@@ -41,6 +43,7 @@ namespace StationeersPlc
                 "Address to listen on. 127.0.0.1 = this computer only. Use 0.0.0.0 to allow other computers (no authentication!).");
             var refresh = Config.Bind("Modbus", "RefreshSeconds", 0.25f, "How often game values are copied into the Modbus tables.");
             var allowWrites = Config.Bind("Modbus", "AllowWrites", true, "When false, the PLC can read everything but change nothing.");
+            WritesAllowed = allowWrites.Value;
             var tableSize = Config.Bind("Modbus", "TableSize", PointStore.MaxSize,
                 "Number of addresses in EACH of the four tables (64 to 65536). A smaller table uses less memory and makes a shorter I/O list. " +
                 "If your saved I/O list already uses higher addresses, the tables are enlarged automatically so nothing is lost.");
