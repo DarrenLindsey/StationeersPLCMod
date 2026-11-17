@@ -70,6 +70,7 @@ header .tbtn{font-size:12px;padding:3px 10px;background:var(--btn);color:var(--t
 .code{font-family:Consolas,monospace;color:var(--acc);font-size:12px}
 .pill{display:inline-block;min-width:38px;text-align:center;border-radius:99px;padding:1px 9px;font-size:11.5px;font-weight:700;background:var(--pillbg);color:var(--dim)}
 .pill.on{background:var(--ok);color:var(--onfg)}
+.pill.tg{cursor:pointer;border:0;font:inherit;font-size:11.5px;font-weight:700}.pill.tg:hover{outline:2px solid var(--acc)}
 .val{font-family:Consolas,monospace}
 .use{padding:1px 8px;font-size:12px;opacity:.7;white-space:nowrap}
 [data-theme=lcars] .use{letter-spacing:.02em;padding:1px 10px}.row:hover .use{opacity:1}
@@ -152,15 +153,23 @@ header .tbtn{font-size:12px;padding:3px 10px;background:var(--btn);color:var(--t
 .fb{padding:0 8px;font-size:12px;margin-right:3px}.fb.on{background:var(--ok);color:var(--onfg)}
 td.frc{white-space:nowrap}.fi{width:64px;background:var(--ed);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:1px 4px;font:inherit}
 .forced{color:var(--warn)}
+.practice{flex:1;overflow:auto;padding:10px 14px;display:none}
+.practice h3{margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+.practice svg{width:100%;max-height:300px;background:var(--ed);border:1px solid var(--line);border-radius:8px}
+.pb-top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.pb-blurb{margin:8px 0 2px}.pb-task{margin:2px 0 8px}
+.pb-ctl{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0}.pb-f{font-size:12.5px;color:var(--dim)}
+.pb-hold.down{background:var(--ok);color:var(--onfg)}.practice ul{list-style:none;margin:0;padding:0}.practice li{padding:2px 0;color:var(--dim)}
+.practice li.done{color:var(--ok)}.practice li.fail{color:var(--bad)}.pb-log{font:12px Consolas,monospace;color:var(--dim);max-height:110px;overflow:auto}
+.practice details{margin-top:8px;color:var(--dim)}
 </style></head><body>
 <header><h1>Stationeers PLC Workstation</h1><span id='st' class='badge stop'>STOP</span><span id='scan' class='badge'></span><select id='thm' class='tbtn' title='Choose a look for this page'><option value=''>Dark</option><option value='light'>Light</option><option value='lcars'>LCARS</option><option value='terminal'>Terminal</option><option value='blueprint'>Blueprint</option><option value='solar'>Solar</option><option value='borg'>Borg</option></select></header>
 <main>
 <div class='left'>
-<section><h2><span class='tabs'><button id='tabL' class='tab on'>Ladder</button><button id='tabT' class='tab'>Text (ST)</button><button id='tabN' class='tab'>Lessons</button></span>
+<section><h2><span class='tabs'><button id='tabL' class='tab on'>Ladder</button><button id='tabT' class='tab'>Text (ST)</button><button id='tabN' class='tab'>Lessons</button><button id='tabP' class='tab' style='display:none'>Practice</button></span>
 <button id='bc'>Compile</button><button id='br' class='go'>Run</button><button id='bs' class='halt'>Stop</button></h2>
 <div id='ladder' class='ladder show'>
  <div class='ltools'><button id='addRung'>+ Rung</button><button id='undo' title='Ctrl+Z'>Undo</button><button id='redo' title='Ctrl+Y'>Redo</button>
-  <select id='ex'><option value=''>Load an example...</option><option value='blink'>Blinker (timer)</option><option value='seal'>Start / Stop seal-in</option><option value='button'>Button controls a light</option><option value='level'>Pump with high/low limits</option><option value='sequence'>Valve, then pump after 5 s</option></select>
+  <select id='ex'><option value=''>Load an example...</option><option value='blink'>Blinker (timer)</option><option value='seal'>Start / Stop seal-in</option><option value='button'>Button controls a light</option><option value='level'>Pump with high/low limits</option><option value='sequence'>Valve, then pump after 5 s</option><option value='tankblock'>Tank pump with a HYST block</option><option value='airlockblock'>Airlock with one AIRLOCK block</option></select>
   <button id='clr'>New</button><button id='shGen'>Show ST</button><span class='hint' id='lhint'>Click a + to add a part. Click a part to edit it.</span></div>
  <div id='lscroll'><svg id='svg' width='600' height='120'></svg></div>
  <div id='props'><span class='hint'>Nothing selected.</span></div>
@@ -171,6 +180,7 @@ td.frc{white-space:nowrap}.fi{width:64px;background:var(--ed);color:var(--text);
 <div class='edwrap'><pre id='ln'>1</pre><textarea id='ed' spellcheck='false' wrap='off'></textarea></div>
 </div>
 <div id='lessons' class='lessons'></div>
+<div id='practice' class='practice' style='display:none'></div>
 <div id='pop'></div><div id='mir'></div><div id='menu'></div>
 <div id='msg' class='msg'></div></section>
 <section style='max-height:200px'><h2><span>Program variables (live)</span></h2><div class='scroll'><table><thead><tr><th>Name</th><th>Type</th><th>At</th><th>Value</th><th>Force</th></tr></thead><tbody id='vars'></tbody></table></div></section>
@@ -193,6 +203,17 @@ var LIB=[
  {l:'END_PROGRAM',k:'kw',d:'End of the program'},
  {l:'VAR',k:'kw',d:'Start of the variable declarations'},
  {l:'END_VAR',k:'kw',d:'End of the variable declarations'},
+ {l:'FUNCTION_BLOCK',k:'kw',d:'Define your own block: FUNCTION_BLOCK Name ... END_FUNCTION_BLOCK (put it before PROGRAM)'},{l:'END_FUNCTION_BLOCK',k:'kw',d:'Ends your block'},
+ {l:'VAR_INPUT',k:'kw',d:'Inside a block: values passed in when it is called'},{l:'VAR_OUTPUT',k:'kw',d:'Inside a block: values the program can read as Name.Output'},
+ {l:'HYST',k:'type',d:'Block: on at/below LOW, off at/above HIGH. Inputs IN LOW HIGH INVERT, output Q'},
+ {l:'PID',k:'type',d:'Block: PID controller. Inputs ENABLE PV SP KP KI KD OUT_MIN OUT_MAX, output OUT'},
+ {l:'AIRLOCK',k:'type',d:'Block: full two-door airlock cycle with locks, pumps and timeout. See the Airlock lesson'},
+ {l:'SOLAR_TRACK',k:'type',d:'Block: sensor angles to solar panel settings. Inputs SENSOR_H SENSOR_V MODE, outputs PANEL_H PANEL_V'},
+ {l:'R_TRIG',k:'type',d:'Block: Q is on for one scan when CLK turns on'},{l:'F_TRIG',k:'type',d:'Block: Q is on for one scan when CLK turns off'},
+ {l:'SR',k:'type',d:'Block: latch, Set wins. Inputs S1 R, output Q1'},{l:'RS',k:'type',d:'Block: latch, Reset wins. Inputs S R1, output Q1'},
+ {l:'TOF',k:'type',d:'Block: off-delay timer. Inputs IN PT, output Q'},{l:'CTU',k:'type',d:'Block: up counter. Inputs CU R PV, outputs Q CV'},
+ {l:'BLINK',k:'type',d:'Block: flasher. Inputs ENABLE ON_TIME OFF_TIME, output Q'},
+ {l:'DT',k:'fn',i:'DT()',d:'DT(): milliseconds since the previous scan'},
  {l:'IF',k:'kw',d:'IF condition THEN ... END_IF;'},{l:'THEN',k:'kw',d:''},{l:'ELSIF',k:'kw',d:'Another condition to test'},{l:'ELSE',k:'kw',d:'Runs when no condition was true'},{l:'END_IF',k:'kw',d:'Ends an IF (needs a ;)'},
  {l:'WHILE',k:'kw',d:'Repeat while true (max 1000 loops per scan)'},{l:'DO',k:'kw',d:''},{l:'END_WHILE',k:'kw',d:'Ends a WHILE (needs a ;)'},
  {l:'AND',k:'op',d:'True when both sides are true'},{l:'OR',k:'op',d:'True when either side is true'},{l:'XOR',k:'op',d:'True when exactly one side is true'},{l:'NOT',k:'op',d:'Flips true and false'},{l:'MOD',k:'op',d:'Remainder after division'},
@@ -203,6 +224,8 @@ var LIB=[
  {l:'ifelse',k:'snip',i:'IF | THEN\n    \nELSE\n    \nEND_IF;',d:'IF / ELSE block'},
  {l:'while',k:'snip',i:'WHILE | DO\n    \nEND_WHILE;',d:'WHILE loop'},
  {l:'timer',k:'snip',i:'Timer1(IN := |, PT := T#1s);',d:'Call a TON timer (declare Timer1 : TON; first)'},
+ {l:'block',k:'snip',i:'FUNCTION_BLOCK |\nVAR_INPUT\n    \nEND_VAR\nVAR_OUTPUT\n    \nEND_VAR\n\nEND_FUNCTION_BLOCK',d:'Skeleton for your own function block'},
+ {l:'hyst',k:'snip',i:'Level1(IN := |, LOW := 20.0, HIGH := 80.0);',d:'Call a HYST block (declare Level1 : HYST; first)'},
  {l:'program',k:'snip',i:'PROGRAM Main\nVAR\n    |\nEND_VAR\n\nEND_PROGRAM',d:'Empty program skeleton'}
 ];
 
@@ -315,7 +338,7 @@ function draw(){
     var open=openG[g.tag]===undefined?nopen:openG[g.tag];
     h+='<div class=\'grp\'><div class=\'gh\' data-g=\''+esc(g.tag)+'\'><span class=\'car\'>'+(open?'▾':'▸')+'</span><b>'+esc(nice(g.tag.replace(/_/g,' ')))+'</b><span>'+esc(nice(g.dev))+'</span><span class=\'cnt\'>'+g.rows.length+(g.rows.length===1?' point':' points')+'</span></div>';
     if(open)g.rows.forEach(function(r){var p=r.p,isb=p.t==='DI'||p.t==='COIL',on=isb&&p.raw===1;
-      var v=isb?'<span class=\'pill'+(on?' on':'')+'\'>'+(on?'ON':'OFF')+'</span>':'<span class=\'val\'>'+esc(p.eng)+'</span>';
+      var v=isb?(p.t==='COIL'&&p.act?'<button class=\'pill tg'+(on?' on':'')+'\' data-a=\''+p.a+'\' data-on=\''+(on?1:0)+'\' title=\'Click to switch this device '+(on?'off':'on')+' in the game\'>'+(on?'ON':'OFF')+'</button>':'<span class=\'pill'+(on?' on':'')+'\'>'+(on?'ON':'OFF')+'</span>'):'<span class=\'val\'>'+esc(p.eng)+'</span>';
       h+='<div class=\'row'+(p.act?'':' off')+'\'><div class=\'nm\'>'+esc(nice(p.sig))+'<small>'+KIND[p.t]+(p.t==='COIL'||p.t==='HR'?' · PLC can change':' · read only')+'</small></div><div class=\'code\'>'+addrOf(p)+'</div><div>'+v+'</div><div><button class=\'use\' data-i=\''+r.i+'\' title=\'Add this to your program\'>+ use</button></div></div>';});
     h+='</div>';
   });
@@ -334,12 +357,14 @@ $('prune').onclick=function(){
 };
 $('chips').addEventListener('click',function(e){var b=e.target.closest('.chip');if(!b)return;cat=b.getAttribute('data-c');[].forEach.call(document.querySelectorAll('.chip'),function(c){c.className='chip'+(c===b?' on':'')});draw()});
 $('iolist').addEventListener('click',function(e){
+  var t=e.target.closest('.tg');if(t){var want=t.getAttribute('data-on')==='1'?0:1;
+    fetch('/api/write?addr='+t.getAttribute('data-a')+'&value='+want,{method:'POST',headers:{'X-Plc':'1'}}).then(function(r){return r.text().then(function(x){if(!r.ok)alert(x)})});return}
   var u=e.target.closest('.use');if(u){if(window.useIO)useIO(pts[parseInt(u.getAttribute('data-i'),10)]);return}
   var g=e.target.closest('.gh');if(g){var t=g.getAttribute('data-g'),was=g.querySelector('.car').textContent==='▾';openG[t]=!was;draw()}});
 function renderVarRows(list){
   var h='';
   list.forEach(function(v){
-    var n=esc(v.n),canForce=v.t!=='TON'&&!/^%Q/.test(v.at||''),f='';
+    var n=esc(v.n),canForce=v.t!=='TON'&&!/^%Q/.test(v.at||'')&&v.n.indexOf('.')<0,f='';
     if(canForce){
       if(v.t==='BOOL')f='<button class=\'fb\' data-n=\''+n+'\' data-v=\'0\'>0</button><button class=\'fb\' data-n=\''+n+'\' data-v=\'1\'>1</button>';
       else f='<input class=\'fi\' type=\'number\' data-n=\''+n+'\' placeholder=\'value\' title=\'type a number, press Enter\'>';
@@ -384,6 +409,29 @@ poll();setInterval(poll,1000);
 /* ===== Ladder editor ===== */
 var LD={vars:[],rungs:[]},W={},SEL=null,MAP={},tab='ladder',mdown=false,lastSvg='',saveT=0,uid=0,genOpen=false;
 var EW=92,EH=62,PAD=16,LM=46,CW=120,GAP=26;
+/* Function block catalog for the ladder editor. Mirrors StLibrary.cs.
+   pin = the BOOL input that receives the rung's power. out = the BOOL output that becomes the power leaving the block
+   (null = power passes straight through). ins = inputs you set in the panel. outs = outputs you can send to variables.
+   req = must be filled in. def = starting value. */
+function bi(n,def){return {n:n,k:'bool',def:def}}
+function ni(n,def,req){return {n:n,k:'num',def:def,req:req}}
+function ti(n,def){return {n:n,k:'time',def:def}}
+var FB={
+ R_TRIG:{d:'One pulse when power turns on',pin:'CLK',out:'Q',ins:[bi('CLK')],outs:[{n:'Q',k:'bool'}]},
+ F_TRIG:{d:'One pulse when power turns off',pin:'CLK',out:'Q',ins:[bi('CLK')],outs:[{n:'Q',k:'bool'}]},
+ SR:{d:'Latch: power sets it, Reset clears it (set wins)',pin:'S1',out:'Q1',ins:[bi('S1'),bi('R')],outs:[{n:'Q1',k:'bool'}]},
+ RS:{d:'Latch: power sets it, Reset clears it (reset wins)',pin:'S',out:'Q1',ins:[bi('S'),bi('R1')],outs:[{n:'Q1',k:'bool'}]},
+ TOF:{d:'Off-delay timer: stays on for a time after power drops',pin:'IN',out:'Q',ins:[bi('IN'),ti('PT','T#1s')],outs:[{n:'Q',k:'bool'}]},
+ CTU:{d:'Counts pulses. Output on when count reaches PV',pin:'CU',out:'Q',ins:[bi('CU'),bi('R'),ni('PV','10')],outs:[{n:'Q',k:'bool'},{n:'CV',k:'num'}]},
+ BLINK:{d:'Flashes its output while power is on',pin:'ENABLE',out:'Q',ins:[bi('ENABLE'),ti('ON_TIME','T#500ms'),ti('OFF_TIME','T#500ms')],outs:[{n:'Q',k:'bool'}]},
+ HYST:{d:'Two limits with a gap. On at or below LOW, off at or above HIGH',pin:null,out:'Q',ins:[ni('IN','',true),ni('LOW','20'),ni('HIGH','80'),bi('INVERT','FALSE')],outs:[{n:'Q',k:'bool'}]},
+ PID:{d:'PID controller. Power enables it',pin:'ENABLE',out:null,ins:[bi('ENABLE'),ni('PV','',true),ni('SP','',true),ni('KP','1.0'),ni('KI','0.0'),ni('KD','0.0'),ni('OUT_MIN','0.0'),ni('OUT_MAX','100.0')],outs:[{n:'OUT',k:'num'}]},
+ SOLAR_TRACK:{d:'Sensor angles to solar panel settings',pin:null,out:null,ins:[ni('SENSOR_H','',true),ni('SENSOR_V','',true),ni('MODE','0')],outs:[{n:'PANEL_H',k:'num'},{n:'PANEL_V',k:'num'}]},
+ AIRLOCK:{d:'Full airlock cycle: doors, locks, pumps, pressure, timeout',pin:null,out:null,
+  ins:[bi('GO_IN'),bi('GO_OUT'),bi('RESET'),ni('PRESSURE','',true),ni('TARGET_IN','100.0'),ni('TARGET_OUT','0.0'),ni('TOL','2.0'),ti('TIMEOUT','T#60s')],
+  outs:[{n:'OPEN_IN',k:'bool'},{n:'OPEN_OUT',k:'bool'},{n:'LOCK_IN',k:'bool'},{n:'LOCK_OUT',k:'bool'},{n:'FILL',k:'bool'},{n:'EVAC',k:'bool'},{n:'BUSY',k:'bool'},{n:'FAULT',k:'bool'},{n:'STATE',k:'num'}]}
+};
+function fbBase(t){return t.split('_').map(function(w){return w.charAt(0)+w.slice(1).toLowerCase()}).join('')}
 function newRung(){return {comment:'',net:[],coils:[]}}
 function resetLD(){LD={vars:[],rungs:[newRung()]};SEL=null}
 function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#4ade80'}
@@ -411,7 +459,7 @@ window.onState=function(s){
   W=w;if(tab==='ladder')renderLadder(false);
 };
 setInterval(function(){if(tab!=='ladder')return;fetch('/api/state').then(function(r){return r.json()}).then(function(s){window.onState(s)}).catch(function(){})},250);
-function truthy(n){var m=/^(\w+)\.(Q|ET)$/i.exec(n||'');if(m){var t=W[m[1]];return t?(m[2].toUpperCase()==='Q'?!!t.q:t.et>0):false}var w=W[n];return w?w.v!==0:false}
+function truthy(n){var m=/^(\w+)\.(Q|ET)$/i.exec(n||'');if(m){var t=W[m[1]];if(t&&t.q!==undefined)return (m[2].toUpperCase()==='Q'?!!t.q:t.et>0)}var w=W[n];return w?w.v!==0:false}
 function num(n){if(n===''||n==null)return 0;if(/^-?\d+(\.\d+)?$/.test(n))return parseFloat(n);var m=/^(\w+)\.ET$/i.exec(n);if(m&&W[m[1]])return W[m[1]].et;var w=W[n];return w?w.v:0}
 function evalEl(e){
   if(e.k==='no')return truthy(e.v);if(e.k==='nc')return !truthy(e.v);
@@ -461,10 +509,11 @@ function drawPar(o,e,arr,x,y,pin,rung){
   L(o,x+sz.w-PAD,cy0,x+sz.w,cy0,pout);
   return {w:sz.w,h:sz.h,pout:pout};
 }
+function sh(s,n){s=String(s);return s.length>n?s.slice(0,n-1)+'\u2026':s}
 function drawEl(o,e,arr,x,cy,pin,rung){
   var mx=x+EW/2,id=reg({t:'el',obj:e,arr:arr,rung:rung}),pout,ac=css('--acc'),tx=css('--text');
   var sel=isSel(e);
-  o.push('<g class="el" data-id="'+id+'">');
+  o.push('<g class="el" data-id="'+id+'"><title>'+esc(e.v||'')+'</title>');
   o.push('<rect x="'+(x+4)+'" y="'+(cy-EH/2+4)+'" width="'+(EW-8)+'" height="'+(EH-8)+'" rx="8" fill="'+(sel?'rgba(96,165,250,.14)':'transparent')+'" stroke="'+(sel?ac:'none')+'" stroke-dasharray="4 3"/>');
   var name=e.v||'?',lab;
   if(e.k==='no'||e.k==='nc'){
@@ -472,7 +521,7 @@ function drawEl(o,e,arr,x,cy,pin,rung){
     L(o,x,cy,mx-9,cy,pin);L(o,mx+9,cy,x+EW,cy,pout);
     o.push('<line x1="'+(mx-9)+'" y1="'+(cy-13)+'" x2="'+(mx-9)+'" y2="'+(cy+13)+'" stroke="'+C(pin)+'" stroke-width="3"/><line x1="'+(mx+9)+'" y1="'+(cy-13)+'" x2="'+(mx+9)+'" y2="'+(cy+13)+'" stroke="'+C(pout)+'" stroke-width="3"/>');
     if(e.k==='nc')o.push('<line x1="'+(mx-14)+'" y1="'+(cy+13)+'" x2="'+(mx+14)+'" y2="'+(cy-13)+'" stroke="'+C(on)+'" stroke-width="2.2"/>');
-    T(o,mx,cy-20,name,'middle',e.v?null:css('--warn'));
+    T(o,mx,cy-20,sh(name,13),'middle',e.v?null:css('--warn'));
     T(o,mx,cy+27,e.k==='no'?'NO':'NC','middle',css('--dim'));
   }else if(e.k==='cmp'){
     var okc=evalEl(e);pout=pin&&okc;
@@ -480,6 +529,13 @@ function drawEl(o,e,arr,x,cy,pin,rung){
     o.push('<rect x="'+(mx-32)+'" y="'+(cy-14)+'" width="64" height="28" rx="6" fill="none" stroke="'+C(pin)+'" stroke-width="2.4"/>');
     T(o,mx,cy+4,(e.a||'?')+' '+e.op+' '+(e.b===''||e.b==null?'?':e.b),'middle');
     T(o,mx,cy+27,'COMPARE','middle',css('--dim'));
+  }else if(e.k==='fb'){
+    var B=FB[e.t]||{ins:[],outs:[]},ov=B.out?truthy(e.v+'.'+B.out):null;
+    pout=B.out?(B.pin?ov:(pin&&ov)):pin;
+    L(o,x,cy,mx-36,cy,pin);L(o,mx+36,cy,x+EW,cy,pout);
+    o.push('<rect x="'+(mx-36)+'" y="'+(cy-22)+'" width="72" height="44" rx="6" fill="none" stroke="'+C(pin)+'" stroke-width="2.4"/>');
+    T(o,mx,cy-5,e.t,'middle',FB[e.t]?null:css('--warn'));
+    T(o,mx,cy+11,sh(e.v||'?',11),'middle',css('--dim'));
   }else if(e.k==='ton'){
     var t=W[e.v],q=t?!!t.q:false,et=t?t.et:0;pout=q;
     L(o,x,cy,mx-34,cy,pin);L(o,mx+34,cy,x+EW,cy,q);
@@ -498,14 +554,14 @@ function drawCoil(o,c,rung,cx,cy,pout){
   L(o,cx,cy,mx-14,cy,pout);L(o,mx+14,cy,cx+CW,cy,lit);
   o.push('<circle cx="'+mx+'" cy="'+cy+'" r="14" fill="'+(lit?C(true):'none')+'" fill-opacity=".25" stroke="'+C(pout)+'" stroke-width="2.4"/>');
   T(o,mx,cy+4,c.k==='set'?'S':c.k==='reset'?'R':c.k==='ncoil'?'/':'','middle');
-  T(o,mx,cy-20,c.v||'?','middle',c.v?(truthy(c.v)?css('--ok'):null):css('--warn'));
+  T(o,mx,cy-20,sh(c.v||'?',17),'middle',c.v?(truthy(c.v)?css('--ok'):null):css('--warn'));
   o.push('</g>');
 }
 
 function renderLadder(force){
   var o=[],y=10,maxNet=0,ac=css('--acc');MAP={};uid=0;
   LD.rungs.forEach(function(r){var w=sizeSeries(r.net).w;if(w>maxNet)maxNet=w});
-  var xc=LM+maxNet,total=xc+CW+30;
+  var avail=($('svg').parentNode.clientWidth||0)-24,xc=Math.max(LM+maxNet,avail-CW-30),total=xc+CW+30; // right rail stretches to the window; long wires fill the gap
   LD.rungs.forEach(function(r,ri){
     if(r.comment)y+=16;var rid=reg({t:'rung',rung:r,idx:ri}),h0=sizeSeries(r.net).h,hc=Math.max(1,r.coils.length)*EH+(r.coils.length?10:0),H=Math.max(h0,hc);
     var rsel=SEL&&SEL.obj===r;
@@ -535,12 +591,14 @@ function renderLadder(force){
     lastSvg=svgTxt;svg.setAttribute('width',total);svg.setAttribute('height',y+10);svg.innerHTML=svgTxt;
   }
 }
+var rzT=0;window.addEventListener('resize',function(){clearTimeout(rzT);rzT=setTimeout(function(){if(tab==='ladder')renderLadder(true)},120)});
 $('svg').addEventListener('mousedown',function(){mdown=true});
 document.addEventListener('mouseup',function(){setTimeout(function(){mdown=false},0)});
 
 /* ---- editing ---- */
-function boolVars(){return LD.vars.filter(function(v){return v.type==='BOOL'}).map(function(v){return v.name}).concat(LD.vars.filter(function(v){return v.type==='TON'}).map(function(v){return v.name+'.Q'}))}
-function numVars(){return LD.vars.filter(function(v){return v.type==='INT'||v.type==='UINT'||v.type==='REAL'||v.type==='DINT'}).map(function(v){return v.name}).concat(LD.vars.filter(function(v){return v.type==='TON'}).map(function(v){return v.name+'.ET'}))}
+function fbOuts(kind){var l=[];LD.vars.forEach(function(v){var B=FB[v.type];if(B)B.outs.forEach(function(o){if(o.k===kind)l.push(v.name+'.'+o.n)})});return l}
+function boolVars(){return LD.vars.filter(function(v){return v.type==='BOOL'}).map(function(v){return v.name}).concat(LD.vars.filter(function(v){return v.type==='TON'}).map(function(v){return v.name+'.Q'})).concat(fbOuts('bool'))}
+function numVars(){return LD.vars.filter(function(v){return v.type==='INT'||v.type==='UINT'||v.type==='REAL'||v.type==='DINT'}).map(function(v){return v.name}).concat(LD.vars.filter(function(v){return v.type==='TON'}).map(function(v){return v.name+'.ET'})).concat(fbOuts('num'))}
 function opts(list,cur,blank){var h='';if(blank!==undefined)h+='<option value="">'+blank+'</option>';var found=false;list.forEach(function(n){if(n===cur)found=true;h+='<option'+(n===cur?' selected':'')+'>'+esc2(n)+'</option>'});if(cur&&!found)h+='<option selected>'+esc2(cur)+'</option>';return h}
 function uniqueName(base){var n=base,i=1;while(LD.vars.some(function(v){return v.name===n})){i++;n=base+i}return n}
 
@@ -563,9 +621,20 @@ function plusMenu(ev,it){
     {t:'Contact (normally open)',d:'passes power when ON',run:function(){insertAt(it.arr,it.idx,{k:'no',v:firstB})}},
     {t:'Contact (normally closed)',d:'passes power when OFF',run:function(){insertAt(it.arr,it.idx,{k:'nc',v:firstB})}},
     {t:'Compare (value test)',d:'e.g. Pressure > 700',run:function(){insertAt(it.arr,it.idx,{k:'cmp',a:firstN,op:'>',b:'0'})}},
+    {t:'Function block...',d:'HYST, PID, AIRLOCK, SOLAR_TRACK, ...',run:function(){fbMenu(ev,it)}},
     {t:'Timer (on-delay)',d:'TON',run:function(){var n=LD.vars.filter(function(v){return v.type==='TON'&&!usedTimer(v.name)})[0];var name=n?n.name:uniqueName('Timer');if(!n)LD.vars.push({name:name,type:'TON',at:''});insertAt(it.arr,it.idx,{k:'ton',v:name,pt:'T#1s'})}}
   ]);
 }
+function fbMenu(ev,it){
+  openMenu(ev,Object.keys(FB).map(function(t){return {t:t,d:FB[t].d,run:function(){addFb(it,t)}}}));
+}
+function addFb(it,t){
+  var name=uniqueName(fbBase(t)),B=FB[t],a={};
+  B.ins.forEach(function(i){if(i.def!==undefined&&i.def!=='')a[i.n]=i.def});
+  LD.vars.push({name:name,type:t,at:''});
+  insertAt(it.arr,it.idx,{k:'fb',t:t,v:name,a:a,o:{}});
+}
+function usedFb(name){var u=false;function walk(a){a.forEach(function(e){if(e.k==='fb'&&e.v===name)u=true;if(e.k==='par')e.branches.forEach(walk)})}LD.rungs.forEach(function(r){walk(r.net)});return u}
 function usedTimer(name){var u=false;function walk(a){a.forEach(function(e){if(e.k==='ton'&&e.v===name)u=true;if(e.k==='par')e.branches.forEach(walk)})}LD.rungs.forEach(function(r){walk(r.net)});return u}
 function coilMenu(ev,r){
   var v=boolVars().filter(function(n){return n.indexOf('.')<0})[0]||'';
@@ -593,6 +662,7 @@ function delSel(){
   if(SEL.t==='coil'){SEL.arr.splice(SEL.arr.indexOf(SEL.obj),1);SEL=null;return changed()}
   var p=findParent(SEL.obj);if(!p)return;
   p.arr.splice(p.arr.indexOf(SEL.obj),1);
+  if(SEL.obj.k==='fb'&&!usedFb(SEL.obj.v)){LD.vars=LD.vars.filter(function(v){return v.name!==SEL.obj.v})}
   if(p.par&&p.arr.length===0&&p.par.branches.length>1)p.par.branches.splice(p.par.branches.indexOf(p.arr),1);
   normalize();SEL=null;changed();
 }
@@ -624,6 +694,18 @@ function showProps(){
     h='<b>Contact</b> <select data-f="v">'+opts(boolVars(),e.v,'choose variable...')+'</select><select data-f="k"><option value="no"'+(e.k==='no'?' selected':'')+'>Normally open</option><option value="nc"'+(e.k==='nc'?' selected':'')+'>Normally closed</option></select>'+btn('branch','Add OR branch')+btn('up','&larr;')+btn('down','&rarr;')+btn('del','Delete')+(e.v&&e.v.indexOf('.')<0?' <span class="hint">Test:</span>'+btn('f1','Force ON')+btn('f0','Force OFF')+btn('fr','Release'):'');
   }else if(e.k==='cmp'){
     h='<b>Compare</b> <select data-f="a">'+opts(numVars(),e.a,'choose variable...')+'</select><select data-f="op">'+['>','<','>=','<=','=','<>'].map(function(o){return '<option'+(o===e.op?' selected':'')+'>'+esc2(o)+'</option>'}).join('')+'</select><input data-f="b" value="'+esc2(e.b)+'" style="width:90px" placeholder="number or variable">'+btn('branch','Add OR branch')+btn('up','&larr;')+btn('down','&rarr;')+btn('del','Delete');
+  }else if(e.k==='fb'){
+    var B=FB[e.t]||{ins:[],outs:[]};
+    h='<b>'+esc2(e.t)+'</b> <span class="hint">'+esc2(B.d||'')+'. Instance <code>'+esc2(e.v)+'</code> (rename it in the Variables table).</span><br>'+
+      (B.pin?'<span class="hint">Rung power goes to <b>'+B.pin+'</b>.</span> ':'<span class="hint">Runs every scan; rung power does not feed it.</span> ')+
+      (B.out?'<span class="hint">Power leaves when <b>'+B.out+'</b> is on.</span>':'<span class="hint">Power passes straight through.</span>')+'<br>';
+    B.ins.forEach(function(i){if(i.n===B.pin)return;var cur=(e.a&&e.a[i.n]!=null)?e.a[i.n]:'';
+      h+='<label class="fbl">'+i.n+' <input data-fa="'+i.n+'" list="fbv" value="'+esc2(cur)+'" style="width:92px" placeholder="'+(i.def!==undefined&&i.def!==''?'default '+esc2(i.def):(i.req?'required':'(none)'))+'"></label> '});
+    h+='<br>';
+    B.outs.forEach(function(o){var cur=(e.o&&e.o[o.n])||'';var lst=(o.k==='bool'?boolVars():numVars()).filter(function(n){return n.indexOf('.')<0});
+      h+='<label class="fbl">'+o.n+' &rarr; <select data-fo="'+o.n+'">'+opts(lst,cur,'(not connected)')+'</select></label> '});
+    h+='<br>'+btn('branch','Add OR branch')+btn('up','&larr;')+btn('down','&rarr;')+btn('del','Delete')+
+      '<datalist id="fbv">'+boolVars().concat(numVars()).map(function(n){return '<option value="'+esc2(n)+'">'}).join('')+'</datalist>';
   }else if(e.k==='ton'){
     h='<b>Timer</b> <select data-f="v">'+opts(LD.vars.filter(function(v){return v.type==='TON'}).map(function(v){return v.name}),e.v,'choose timer...')+'</select> delay <input data-f="pt" value="'+esc2(e.pt)+'" style="width:80px" title="examples: T#500ms  T#2s  T#1m"><span class="hint">Starts counting when power arrives; its output turns on when time is up.</span>'+btn('branch','Add OR branch')+btn('up','&larr;')+btn('down','&rarr;')+btn('del','Delete');
   }
@@ -631,7 +713,10 @@ function showProps(){
 }
 $('props').addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b)return;var a=b.getAttribute('data-a');if(a==='del')delSel();else if(a==='up')moveSel(-1);else if(a==='down')moveSel(1);else if(a==='branch')addBranch();else if(a==='f1'||a==='f0'){post('/api/force?name='+encodeURIComponent(SEL.obj.v)+'&value='+(a==='f1'?1:0))}else if(a==='fr'){post('/api/force?name='+encodeURIComponent(SEL.obj.v)+'&release=1')}});
 $('props').addEventListener('change',function(ev){
-  var f=ev.target.getAttribute('data-f');if(!f||!SEL)return;SEL.obj[f]=ev.target.value;
+  if(!SEL)return;
+  var fa=ev.target.getAttribute('data-fa');if(fa){if(!SEL.obj.a)SEL.obj.a={};SEL.obj.a[fa]=ev.target.value.trim();return changed()}
+  var fo=ev.target.getAttribute('data-fo');if(fo){if(!SEL.obj.o)SEL.obj.o={};SEL.obj.o[fo]=ev.target.value;return changed()}
+  var f=ev.target.getAttribute('data-f');if(!f)return;SEL.obj[f]=ev.target.value;
   if(f==='comment'){save();renderLadder(true);return}changed();
 });
 
@@ -639,7 +724,7 @@ $('props').addEventListener('change',function(ev){
 function renderVars(){
   var h='<b>Variables</b> <span class="hint">Give each real device signal a name. Pick the address from the list, or leave it blank for a plain internal variable.</span><table><thead><tr><th>Name</th><th>Type</th><th>Address</th><th></th></tr></thead><tbody>';
   LD.vars.forEach(function(v,i){
-    h+='<tr><td><input data-i="'+i+'" data-f="name" value="'+esc2(v.name)+'"></td><td><select data-i="'+i+'" data-f="type">'+['BOOL','INT','TON'].map(function(t){return '<option'+(t===v.type?' selected':'')+'>'+t+'</option>'}).join('')+'</select></td><td><input data-i="'+i+'" data-f="at" list="addrs" value="'+esc2(v.at)+'" placeholder="none" '+(v.type==='TON'?'disabled':'')+'></td><td><button data-i="'+i+'" data-a="rm">x</button></td></tr>';
+    h+='<tr><td><input data-i="'+i+'" data-f="name" value="'+esc2(v.name)+'"></td><td><select data-i="'+i+'" data-f="type"'+(FB[v.type]?' disabled':'')+'>'+['BOOL','INT','TON'].concat(FB[v.type]?[v.type]:[]).map(function(t){return '<option'+(t===v.type?' selected':'')+'>'+t+'</option>'}).join('')+'</select></td><td><input data-i="'+i+'" data-f="at" list="addrs" value="'+esc2(v.at)+'" placeholder="none" '+(v.type==='TON'||FB[v.type]?'disabled':'')+'></td><td><button data-i="'+i+'" data-a="rm">x</button></td></tr>';
   });
   h+='</tbody></table><button data-a="add">+ Variable</button><datalist id="addrs"></datalist>';
   $('lvars').innerHTML=h;fillAddrs(true);
@@ -653,7 +738,7 @@ function fillAddrs(force){var d=$('addrs');if(!d)return;var h='';pts.forEach(fun
 window.onPoints=function(){fillAddrs()};
 function renameRefs(from,to){
   function fix(s){if(s===from)return to;if(typeof s==='string'&&s.indexOf(from+'.')===0)return to+s.substring(from.length);return s}
-  LD.rungs.forEach(function(r){(function walk(a){a.forEach(function(e){if(e.k==='par')e.branches.forEach(walk);else{if(e.v!=null)e.v=fix(e.v);if(e.a!=null)e.a=fix(e.a);if(e.b!=null)e.b=fix(e.b)}})})(r.net);r.coils.forEach(function(c){c.v=fix(c.v)})});
+  LD.rungs.forEach(function(r){(function walk(a){a.forEach(function(e){if(e.k==='par')e.branches.forEach(walk);else{if(e.v!=null)e.v=fix(e.v);if(e.k==='fb'){[e.a,e.o].forEach(function(m){if(m)Object.keys(m).forEach(function(k){m[k]=fix(m[k])})})}else{if(e.a!=null)e.a=fix(e.a);if(e.b!=null)e.b=fix(e.b)}}})})(r.net);r.coils.forEach(function(c){c.v=fix(c.v)})});
 }
 $('lvars').addEventListener('click',function(ev){var b=ev.target.closest('button');if(!b)return;var a=b.getAttribute('data-a');
   if(a==='add'){LD.vars.push({name:uniqueName('Var'),type:'BOOL',at:''});changed()}
@@ -669,12 +754,23 @@ $('lvars').addEventListener('change',function(ev){var t=ev.target,i=t.getAttribu
 function andJ(a,b){if(a==='TRUE')return b;if(b==='TRUE')return a;return a+' AND '+b}
 function orJ(l){if(l.indexOf('TRUE')>=0)return 'TRUE';if(l.length===1)return l[0];return '('+l.join(' OR ')+')'}
 function genST(){
-  var errs=[],decl=[],body=[],timers={};
+  var errs=[],decl=[],body=[],timers={},fbUsed={};
   LD.vars.forEach(function(v){if(!validName(v.name))errs.push('Variable name "'+v.name+'" is not valid (letters, digits, underscore; not starting with a digit).');decl.push('    '+v.name+(v.at?' AT '+v.at:'')+' : '+v.type+';')});
   function ser(a,left,st,ri){var e=left;
     a.forEach(function(el){
       if(el.k==='par'){e=orJ(el.branches.map(function(b){return ser(b,e,st,ri)}))}
       else if(el.k==='ton'){if(!el.v){errs.push('Rung '+(ri+1)+': choose a timer.');return}if(timers[el.v])errs.push('Rung '+(ri+1)+': timer '+el.v+' is used more than once.');timers[el.v]=1;st.push(el.v+'(IN := '+e+', PT := '+(el.pt||'T#1s')+');');e=el.v+'.Q'}
+      else if(el.k==='fb'){
+        var B=FB[el.t];if(!B||!el.v){errs.push('Rung '+(ri+1)+': choose a block.');return}
+        if(fbUsed[el.v])errs.push('Rung '+(ri+1)+': block '+el.v+' is used more than once. Each block needs its own copy.');fbUsed[el.v]=1;
+        var args=[];if(B.pin)args.push(B.pin+' := '+e);
+        B.ins.forEach(function(i){if(i.n===B.pin)return;var val=((el.a&&el.a[i.n])||'').trim();
+          if(val===''){if(i.req)errs.push('Rung '+(ri+1)+': '+el.t+' needs a value for '+i.n+'.');return}
+          args.push(i.n+' := '+val)});
+        st.push(el.v+'('+args.join(', ')+');');
+        B.outs.forEach(function(o){var tv=el.o&&el.o[o.n];if(tv)st.push(tv+' := '+el.v+'.'+o.n+';')});
+        if(B.out){var q=el.v+'.'+B.out;e=B.pin?q:andJ(e,q)}
+      }
       else if(el.k==='cmp'){if(!el.a||el.b===''||el.b==null)errs.push('Rung '+(ri+1)+': finish the compare block.');e=andJ(e,'('+el.a+' '+el.op+' '+el.b+')')}
       else{if(!el.v)errs.push('Rung '+(ri+1)+': choose a variable for a contact.');e=andJ(e,(el.k==='nc'?'NOT ':'')+el.v)}
     });return e}
@@ -727,9 +823,10 @@ $('br').onclick=function(){
 function setTab(t){
   tab=t;$('tabL').className='tab'+(t==='ladder'?' on':'');$('tabT').className='tab'+(t==='st'?' on':'');$('tabN').className='tab'+(t==='lessons'?' on':'');
   $('ladder').className='ladder'+(t==='ladder'?' show':'');$('stview').style.display=t==='st'?'flex':'none';$('lessons').style.display=t==='lessons'?'block':'none';
+  $('tabP').className='tab'+(t==='practice'?' on':'');$('practice').style.display=t==='practice'?'block':'none';
   if(t==='ladder'){renderLadder(true);scheduleCheck()}else if(t==='st'){hidePop();lines()}
 }
-$('tabL').onclick=function(){setTab('ladder')};$('tabT').onclick=function(){setTab('st')};$('tabN').onclick=function(){setTab('lessons')};
+$('tabL').onclick=function(){setTab('ladder')};$('tabT').onclick=function(){setTab('st')};$('tabN').onclick=function(){setTab('lessons')};$('tabP').onclick=function(){setTab('practice')};if(window.Bench)$('tabP').style.display='';
 
 /* ---- use a device signal from the I/O list ---- */
 window.useIO=function(p){
@@ -757,6 +854,10 @@ var STARTERS={
   {comment:'Seal-in: Start latches Motor on, Stop breaks it',net:[{k:'par',branches:[[{k:'no',v:'Start'}],[{k:'no',v:'Motor'}]]},{k:'nc',v:'Stop'}],coils:[{k:'coil',v:'Motor'}]}]}},
  button:function(){return {vars:[V('Button','BOOL'),V('Light','BOOL')],rungs:[
   {comment:'The light follows the button',net:[{k:'no',v:'Button'}],coils:[{k:'coil',v:'Light'}]}]}},
+ tankblock:function(){return {vars:[V('Level','INT'),V('Pump','BOOL'),V('Fill','HYST')],rungs:[
+  {comment:'HYST keeps the pump on until the tank is full, then off until it drops',net:[{k:'fb',t:'HYST',v:'Fill',a:{IN:'Level',LOW:'100',HIGH:'300',INVERT:'FALSE'},o:{}}],coils:[{k:'coil',v:'Pump'}]}]}},
+ airlockblock:function(){return {vars:[V('Pressure','INT'),V('GoIn','BOOL'),V('GoOut','BOOL'),V('DoorIn','BOOL'),V('DoorOut','BOOL'),V('LockIn','BOOL'),V('LockOut','BOOL'),V('FillPump','BOOL'),V('EvacPump','BOOL'),V('Cycle','AIRLOCK')],rungs:[
+  {comment:'One AIRLOCK block does the whole cycle. Connect the variables to your devices.',net:[{k:'fb',t:'AIRLOCK',v:'Cycle',a:{GO_IN:'GoIn',GO_OUT:'GoOut',PRESSURE:'Pressure',TARGET_IN:'100.0',TARGET_OUT:'0.0',TOL:'2.0',TIMEOUT:'T#60s'},o:{OPEN_IN:'DoorIn',OPEN_OUT:'DoorOut',LOCK_IN:'LockIn',LOCK_OUT:'LockOut',FILL:'FillPump',EVAC:'EvacPump'}}],coils:[]}]}},
  level:function(){return {vars:[V('Pressure','INT'),V('Pump','BOOL')],rungs:[
   {comment:'Start the pump above the high limit',net:[{k:'cmp',a:'Pressure',op:'>',b:'800'}],coils:[{k:'set',v:'Pump'}]},
   {comment:'Stop it below the low limit',net:[{k:'cmp',a:'Pressure',op:'<',b:'600'}],coils:[{k:'reset',v:'Pump'}]}]}},
@@ -784,16 +885,33 @@ var LESSONS=[
   chal:'Add a rung that forces the pump off if a Stop variable is ON, whatever the pressure.',starter:'level'},
  {t:'5. Sequence with a delay',goal:'Ordering actions',learn:'Industrial processes start things in order. A timer on the second step waits for the first step to be true, then adds a delay.',
   steps:['Press Load starter and connect Valve and Pump to real devices; use Force on Start to try it.','Compile and Run, then force Start to 1: the valve opens now, the pump follows after 5 seconds.','Force Start to 0 to see both stop.'],
-  chal:'Make the pump stop 3 seconds after the valve closes (needs an off-delay: build it with a second timer).',starter:'sequence'}
+  chal:'Make the pump stop 3 seconds after the valve closes (needs an off-delay: build it with a second timer).',starter:'sequence'},
+ {t:'6. Function blocks in ladder',goal:'Using blocks from the + menu',learn:'Click any + on a rung and choose Function block to drop in HYST, PID, AIRLOCK and more. A block with a power pin takes the rung power into that pin. Others run every scan and you set their inputs in the panel below the ladder. Send block outputs to your own variables with the arrows, or use them in contacts as Name.Output.',
+  steps:['Press Load starter. It builds a tank pump with a HYST block: IN is Level, LOW and HIGH are 100 and 300.','Give Level a gas sensor or tank address and Pump a pump On switch, then Compile and Run.','Click the HYST box to see its inputs. Try the AIRLOCK starter from the examples list too.'],
+  chal:'Add a BLINK block on a second rung with Fill.Q as its power so a warning lamp flashes while the pump runs.',starter:'tankblock'},
+ {t:'7. Function blocks: a tank pump (ST)',goal:'Reusing logic with HYST',learn:'A function block is a ready-made piece of logic with its own memory. You declare one like a variable, call it every scan with its inputs, then read its outputs as Name.Output. HYST holds a pump on until the tank is full, so you no longer build the limits by hand.',
+  steps:['Press Load into ST editor. Find a gas sensor or tank Pressure reading and a pump On switch in Devices &amp; I/O, and put their addresses on the Level and Pump lines.','Compile and Run. Watch Fill.Q in the Program variables table: it turns on below 100 and off above 300.','Change INVERT to TRUE: now it is a cooler or vent that runs when the value is HIGH.'],
+  chal:'Add a BLINK block that flashes a warning light whenever the pump has been on for more than 30 seconds (use a TON and BLINK together).',
+  st:'PROGRAM Main\nVAR\n    Level AT %IW0 : INT;      // replace with your sensor address\n    Pump  AT %QX0 : BOOL;     // replace with your pump address\n    Fill  : HYST;\nEND_VAR\n\nFill(IN := Level, LOW := 100.0, HIGH := 300.0);\nPump := Fill.Q;\nEND_PROGRAM\n'},
+ {t:'8. An airlock with one block',goal:'A state machine with safety',learn:'The AIRLOCK block runs the whole cycle: it shuts and locks both doors, pumps the chamber to the target pressure, then opens only the destination door. If the pressure does not arrive before the timeout it stops, with FAULT on and both doors locked. Players build this by hand in IC10; here you wire its inputs and outputs and the block does the sequencing.',
+  steps:['Press Load into ST editor. Put your airlock sensor, door and pump addresses on the lines at the top (the in-game airlock devices show in Devices &amp; I/O).','Compile and Run. Pulse GoIn or GoOut with Force: the doors lock, FILL or EVAC runs, then one door opens.','Watch Lock.STATE and Lock.FAULT. To test the safety timeout, stop the pump and wait 60 seconds.'],
+  chal:'Add a BLINK block so a beacon flashes while Lock.BUSY is on, and a second one that flashes quickly on FAULT.',
+  st:'PROGRAM Main\nVAR\n    Pressure AT %IW0 : INT;       // chamber pressure sensor (kPa)\n    GoIn     AT %IX0 : BOOL;      // button inside-bound\n    GoOut    AT %IX1 : BOOL;      // button outside-bound\n    DoorIn   AT %QX0 : BOOL;      // 1 = open\n    DoorOut  AT %QX1 : BOOL;\n    LockIn   AT %QX2 : BOOL;\n    LockOut  AT %QX3 : BOOL;\n    FillPump AT %QX4 : BOOL;      // adds gas from the station\n    EvacPump AT %QX5 : BOOL;      // removes gas from the chamber\n    Lock     : AIRLOCK;\nEND_VAR\n\nLock(GO_IN := GoIn, GO_OUT := GoOut, PRESSURE := Pressure, TARGET_IN := 100.0, TARGET_OUT := 0.0);\nDoorIn := Lock.OPEN_IN;\nDoorOut := Lock.OPEN_OUT;\nLockIn := Lock.LOCK_IN;\nLockOut := Lock.LOCK_OUT;\nFillPump := Lock.FILL;\nEvacPump := Lock.EVAC;\nEND_PROGRAM\n'},
+ {t:'9. Write your own function block',goal:'FUNCTION_BLOCK',learn:'You can make your own blocks. Write FUNCTION_BLOCK before PROGRAM, list what goes in (VAR_INPUT) and what comes out (VAR_OUTPUT), keep private memory in VAR, then write the logic. Each time you declare an instance it gets its own copy of the memory, so two pumps can each use the same block independently.',
+  steps:['Press Load into ST editor and read the Pulse block: it turns an output on for a set time after a button press.','Compile and Run. Force Btn to 1 then 0 and watch Short.Out and Long.Out run for different times.','Press Check often while editing. Errors inside a block are reported even if nothing calls it yet.'],
+  chal:'Write a block called Debounce that only turns Out on after In has been on for 200 ms, and use it on the button.',
+  st:'FUNCTION_BLOCK Pulse\nVAR_INPUT\n    Go  : BOOL;\n    Len : TIME := T#1s;\nEND_VAR\nVAR_OUTPUT\n    Out : BOOL;\nEND_VAR\nVAR\n    Edge  : R_TRIG;\n    Timer : TON;\nEND_VAR\nEdge(CLK := Go);\nIF Edge.Q THEN\n    Out := TRUE;\nEND_IF;\nTimer(IN := Out, PT := Len);\nIF Timer.Q THEN\n    Out := FALSE;\nEND_IF;\nEND_FUNCTION_BLOCK\n\nPROGRAM Main\nVAR\n    Btn   : BOOL;\n    Short : Pulse;\n    Long  : Pulse;\nEND_VAR\n\nShort(Go := Btn, Len := T#300ms);\nLong(Go := Btn, Len := T#3s);\nEND_PROGRAM\n'}
 ];
 function renderLessons(){
   var h='<p class="hint">Work through these in order. Each one loads a starter ladder for you to connect to real devices.</p>';
   LESSONS.forEach(function(l,i){
-    h+='<div class="lesson"><h3>'+esc2(l.t)+'</h3><div class="goal">You will learn: '+esc2(l.goal)+'</div><p>'+l.learn+'</p><ol>'+l.steps.map(function(x){return '<li>'+x+'</li>'}).join('')+'</ol><p class="chal">Challenge: '+l.chal+'</p><button data-l="'+i+'">Load starter</button></div>';
+    h+='<div class="lesson"><h3>'+esc2(l.t)+'</h3><div class="goal">You will learn: '+esc2(l.goal)+'</div><p>'+l.learn+'</p><ol>'+l.steps.map(function(x){return '<li>'+x+'</li>'}).join('')+'</ol><p class="chal">Challenge: '+l.chal+'</p><button data-l="'+i+'">'+(l.st?'Load into ST editor':'Load starter')+'</button></div>';
   });
   $('lessons').innerHTML=h;
 }
-$('lessons').addEventListener('click',function(e){var b=e.target.closest('button[data-l]');if(!b)return;var l=LESSONS[parseInt(b.getAttribute('data-l'),10)];if(loadStarter(l.starter))setTab('ladder')});
+$('lessons').addEventListener('click',function(e){var b=e.target.closest('button[data-l]');if(!b)return;var l=LESSONS[parseInt(b.getAttribute('data-l'),10)];
+  if(l.st){if(ed.value.trim()&&ed.value.trim()!==l.st.trim()&&!confirm('Replace the program in the ST editor with this example?'))return;ed.value=l.st;lines();post('/api/program',l.st);dirty=false;setTab('st');return}
+  if(loadStarter(l.starter))setTab('ladder')});
 renderLessons();
 
 /* ---- startup ---- */

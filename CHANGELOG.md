@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0-beta (branch `beta`, not yet built or tested in game)
+- **Practice Bench**: `standalone/StationeersPLC-Practice.html` runs the whole workstation offline with simulated devices (light and button, beacon, tank pump, airlock), goals and faults. No game needed. Rebuild it with `python3 build_practice.py`.
+- Function blocks in Structured Text: R_TRIG, F_TRIG, SR, RS, TOF, CTU, BLINK, HYST, PID, SOLAR_TRACK, AIRLOCK, plus your own with FUNCTION_BLOCK. `DT()` gives ms since the last scan.
+- Function block palette in the ladder editor.
+- Clickable ON/OFF switches in the I/O list (while the PLC is stopped).
+- Ladder rungs stretch to the window width; new lessons 6 to 9.
+- The C# changes (StRuntime.cs, StLibrary.cs, WebServer.cs, Plugin.cs) have not been compiled yet.
+
 ## 0.7.0
 - Remove offline points button, with persistent address high-water marks (`#NextFree` line in the CSV).
 - Device renames in the game are followed in the I/O list.
