@@ -1,0 +1,8 @@
+# Visual Studio / .NET build output and local files
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.pdb
+*.tmp
